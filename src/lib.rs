@@ -4,9 +4,10 @@ use std::collections::HashSet;
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Corner, Rect};
+use ratatui::prelude::Constraint;
 use ratatui::style::Style;
 use ratatui::text::Text;
-use ratatui::widgets::{Block, StatefulWidget, Widget};
+use ratatui::widgets::{Block, Row, StatefulWidget, Table, TableState, Widget};
 use unicode_width::UnicodeWidthStr;
 
 mod flatten;
@@ -180,6 +181,7 @@ impl TreeState {
 #[derive(Debug, Clone)]
 pub struct TreeItem<'a> {
     text: Text<'a>,
+    data: Row<'a>,
     style: Style,
     children: Vec<TreeItem<'a>>,
 }
@@ -190,8 +192,23 @@ impl<'a> TreeItem<'a> {
     where
         T: Into<Text<'a>>,
     {
+        let row_data: [ratatui::widgets::Cell; 0] = [];
         Self {
             text: text.into(),
+            data: Row::new(row_data),
+            style: Style::new(),
+            children: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn new_leaf_with_data<T>(text: T, data: Row<'a>) -> Self
+    where
+        T: Into<Text<'a>>,
+    {
+        Self {
+            text: text.into(),
+            data,
             style: Style::new(),
             children: Vec::new(),
         }
@@ -203,8 +220,24 @@ impl<'a> TreeItem<'a> {
         T: Into<Text<'a>>,
         Children: Into<Vec<TreeItem<'a>>>,
     {
+        let row_data: [ratatui::widgets::Cell; 0] = [];
         Self {
             text: text.into(),
+            data: Row::new(row_data),
+            style: Style::new(),
+            children: children.into(),
+        }
+    }
+
+    #[must_use]
+    pub fn new_with_data<T, Children>(text: T, children: Children, data: Row<'a>) -> Self
+    where
+        T: Into<Text<'a>>,
+        Children: Into<Vec<TreeItem<'a>>>,
+    {
+        Self {
+            text: text.into(),
+            data,
             style: Style::new(),
             children: children.into(),
         }
@@ -272,6 +305,9 @@ impl<'a> TreeItem<'a> {
 pub struct Tree<'a> {
     items: Vec<TreeItem<'a>>,
 
+    table_header: Option<Row<'a>>,
+    table_widths: &'a [Constraint],
+
     block: Option<Block<'a>>,
     start_corner: Corner,
     /// Style used as a base style for the widget
@@ -298,6 +334,8 @@ impl<'a> Tree<'a> {
     {
         Self {
             items: items.into(),
+            table_header: None,
+            table_widths: &[],
             block: None,
             start_corner: Corner::TopLeft,
             style: Style::new(),
@@ -355,6 +393,18 @@ impl<'a> Tree<'a> {
     #[must_use]
     pub const fn node_no_children_symbol(mut self, symbol: &'a str) -> Self {
         self.node_no_children_symbol = symbol;
+        self
+    }
+
+    #[must_use]
+    pub fn table_header(mut self, headers: Option<Row<'a>>) -> Self {
+        self.table_header = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn table_widths(mut self, widths: &'a [Constraint]) -> Self {
+        self.table_widths = widths;
         self
     }
 }
@@ -419,6 +469,59 @@ impl<'a> StatefulWidget for Tree<'a> {
 
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
+
+        let (area, table_area) = if area.width > 24 {
+            let table_area = Rect { width: 24, ..area };
+            let mut area = Rect {
+                x: area.x + 24,
+                width: area.width - 24,
+                ..area
+            };
+            // If the user has provided a table header, we must adjust our rendering as well
+            // if we want to match them vertically.
+            // Unfortunately `Row` doesn't provide us the total height of the header row,
+            // so we assume 1 here.
+            if self.table_header.is_some() {
+                area.y += 1;
+                area.height -= 1;
+            }
+            (area, Some(table_area))
+        } else {
+            (area, None)
+        };
+
+        if let Some(table_area) = table_area {
+            let mut selection = None;
+
+            let data_rows: Vec<_> = visible
+                .iter()
+                .skip(state.offset)
+                .take(end - start)
+                .enumerate()
+                .map(|(index, item)| {
+                    if state.selected == item.identifier {
+                        selection = Some(index);
+                    }
+                    item.item.data.clone()
+                })
+                .collect();
+
+            let mut table = Table::new(data_rows)
+                .widths(self.table_widths)
+                .highlight_style(self.highlight_style);
+
+            if let Some(headers) = self.table_header {
+                table = table.header(headers);
+            }
+
+            StatefulWidget::render(
+                table,
+                table_area,
+                buf,
+                &mut TableState::default().with_selected(selection),
+            );
+        }
+
         #[allow(clippy::cast_possible_truncation)]
         for item in visible.iter().skip(state.offset).take(end - start) {
             #[allow(clippy::single_match_else)] // Keep same as List impl
