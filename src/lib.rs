@@ -431,6 +431,28 @@ impl<'a> StatefulWidget for Tree<'a> {
         if visible.is_empty() {
             return;
         }
+
+        // Calculate area needed for table, hide it if the frame is too small (24 is arbitrary)
+        let (area, table_area) = if area.width > 24 {
+            let table_area = Rect { width: 24, ..area };
+            let mut area = Rect {
+                x: area.x + 24,
+                width: area.width - 24,
+                ..area
+            };
+            // If the user has provided a table header, we must adjust our rendering as well
+            // if we want to match them vertically.
+            // Unfortunately `Row` doesn't provide us the total height of the header row,
+            // so we assume 1 here.
+            if self.table_header.is_some() {
+                area.y += 1;
+                area.height -= 1;
+            }
+            (area, Some(table_area))
+        } else {
+            (area, None)
+        };
+
         let available_height = area.height as usize;
 
         let selected_index = if state.selected.is_empty() {
@@ -469,26 +491,6 @@ impl<'a> StatefulWidget for Tree<'a> {
 
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
-
-        let (area, table_area) = if area.width > 24 {
-            let table_area = Rect { width: 24, ..area };
-            let mut area = Rect {
-                x: area.x + 24,
-                width: area.width - 24,
-                ..area
-            };
-            // If the user has provided a table header, we must adjust our rendering as well
-            // if we want to match them vertically.
-            // Unfortunately `Row` doesn't provide us the total height of the header row,
-            // so we assume 1 here.
-            if self.table_header.is_some() {
-                area.y += 1;
-                area.height -= 1;
-            }
-            (area, Some(table_area))
-        } else {
-            (area, None)
-        };
 
         if let Some(table_area) = table_area {
             let mut selection = None;
