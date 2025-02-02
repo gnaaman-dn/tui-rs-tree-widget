@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use ratatui::text::Text;
+use ratatui::{text::Text, widgets::Row};
 
 /// One item inside a [`Tree`](crate::Tree).
 ///
@@ -37,6 +37,7 @@ use ratatui::text::Text;
 pub struct TreeItem<'text, Identifier> {
     pub(super) identifier: Identifier,
     pub(super) text: Text<'text>,
+    pub(super) data: Row<'text>,
     pub(super) children: Vec<Self>,
 }
 
@@ -50,9 +51,25 @@ where
     where
         T: Into<Text<'text>>,
     {
+        let row_data: [ratatui::widgets::Cell; 0] = [];
         Self {
             identifier,
             text: text.into(),
+            data: Row::new(row_data),
+            children: Vec::new(),
+        }
+    }
+
+    /// Create a new `TreeItem` without children.
+    #[must_use]
+    pub fn new_leaf_with_data<T>(identifier: Identifier, text: T, data: Row<'text>) -> Self
+    where
+        T: Into<Text<'text>>,
+    {
+        Self {
+            identifier,
+            text: text.into(),
+            data,
             children: Vec::new(),
         }
     }
@@ -77,9 +94,39 @@ where
             ));
         }
 
+        let row_data: [ratatui::widgets::Cell; 0] = [];
         Ok(Self {
             identifier,
             text: text.into(),
+            data: Row::new(row_data),
+            children,
+        })
+    }
+
+        /// Create a new `TreeItem` with children.
+    ///
+    /// # Errors
+    ///
+    /// Errors when there are duplicate identifiers in the children.
+    pub fn new_with_data<T>(identifier: Identifier, text: T, children: Vec<Self>, data: Row<'text>) -> std::io::Result<Self>
+    where
+        T: Into<Text<'text>>,
+    {
+        let identifiers = children
+            .iter()
+            .map(|item| &item.identifier)
+            .collect::<HashSet<_>>();
+        if identifiers.len() != children.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "The children contain duplicate identifiers",
+            ));
+        }
+
+        Ok(Self {
+            identifier,
+            text: text.into(),
+            data,
             children,
         })
     }

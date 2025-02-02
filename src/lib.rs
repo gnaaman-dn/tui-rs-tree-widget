@@ -8,9 +8,9 @@ The user interaction state (like the current selection) is stored in the [`TreeS
 use std::collections::HashSet;
 
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Rect};
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Scrollbar, ScrollbarState, StatefulWidget, Widget};
+use ratatui::widgets::{Block, Row, Scrollbar, ScrollbarState, StatefulWidget, Table, TableState, Widget};
 use unicode_width::UnicodeWidthStr as _;
 
 pub use crate::flatten::Flattened;
@@ -55,6 +55,9 @@ mod tree_state;
 pub struct Tree<'a, Identifier> {
     items: &'a [TreeItem<'a, Identifier>],
 
+    table_header: Option<Row<'a>>,
+    table_widths: &'a [Constraint],
+
     block: Option<Block<'a>>,
     scrollbar: Option<Scrollbar<'a>>,
     /// Style used as a base style for the widget
@@ -96,6 +99,8 @@ where
 
         Ok(Self {
             items,
+            table_header: None,
+            table_widths: &[],
             block: None,
             scrollbar: None,
             style: Style::new(),
@@ -152,6 +157,18 @@ where
         self.node_no_children_symbol = symbol;
         self
     }
+
+    #[must_use]
+    pub fn table_header(mut self, headers: Option<Row<'a>>) -> Self {
+        self.table_header = headers;
+        self
+    }
+
+    #[must_use]
+    pub fn table_widths(mut self, widths: &'a [Constraint]) -> Self {
+        self.table_widths = widths;
+        self
+    }
 }
 
 #[test]
@@ -179,6 +196,27 @@ where
             block.render(full_area, buf);
             inner_area
         });
+
+        // Split the overall area into the tree and table areas.
+        let (area, table_area) = if area.width > 24 {
+            let table_area = Rect { width: 24, ..area };
+            let mut area = Rect {
+                x: area.x + 24,
+                width: area.width - 24,
+                ..area
+            };
+            // If the user has provided a table header, we must adjust our rendering as well
+            // if we want to match them vertically.
+            // Unfortunately `Row` doesn't provide us the total height of the header row,
+            // so we assume 1 here.
+            if self.table_header.is_some() {
+                area.y += 1;
+                area.height -= 1;
+            }
+            (area, Some(table_area))
+        } else {
+            (area, None)
+        };
 
         state.last_area = area;
         state.last_rendered_identifiers.clear();
@@ -256,6 +294,39 @@ where
 
         let mut current_height = 0;
         let has_selection = !state.selected.is_empty();
+
+        if let Some(table_area) = table_area {
+            let mut selection = None;
+
+            let data_rows: Vec<_> = visible
+                .iter()
+                .skip(state.offset)
+                .take(end - start)
+                .enumerate()
+                .map(|(index, item)| {
+                    if state.selected == item.identifier {
+                        selection = Some(index);
+                    }
+                    item.item.data.clone()
+                })
+                .collect();
+
+            let mut table = Table::new(data_rows, self.table_widths)
+            .row_highlight_style(self.highlight_style);
+
+            if let Some(headers) = self.table_header {
+                table = table.header(headers);
+            }
+
+            StatefulWidget::render(
+                table,
+                table_area,
+                buf,
+                &mut TableState::default().with_selected(selection),
+            );
+        }
+
+
         #[allow(clippy::cast_possible_truncation)]
         for flattened in visible.iter().skip(state.offset).take(end - start) {
             let Flattened { identifier, item } = flattened;
